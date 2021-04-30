@@ -71,138 +71,157 @@ Start               proc
           ; Get a line of input from the keyboard, echoing to display.
           ; Normally enter at escape or getline.
           ;--------------------------------------
-notcr               cmpa      #'_'|$80            ; "_"? [NB back arrow]
-                    beq       backspace           ; Yes.
+NotCR@@             cmpa      #'_'|$80            ; "_"? [NB back arrow]
+                    beq       Backspace@@         ; Yes.
                     cmpa      #$1b|$80            ; ESC?
-                    beq       escape              ; Yes.
+                    beq       Esc@@               ; Yes.
                     inx                           ; Advance text index.
                     incb
-                    bpl       nextchar            ; Auto ESC if > 127.
+                    bpl       NextChar@@          ; Auto ESC if > 127.
 
-escape              lda       #'\'|$80            ; "\".
-                    jsr       echo                ; Output it.
+Esc@@               lda       #'\'|$80            ; '\'.
+                    jsr       Echo                ; Output it.
 
-getline             lda       #13|$80             ; CR.
-                    jsr       echo                ; Output it.
+GetLine@@           lda       #13|$80             ; CR.
+                    jsr       Echo                ; Output it.
                     ldx       #in+1               ; Initiallize [sic] text index.
                     ldb       #1
-backspace           dex                           ; Back up text index.
+Backspace@@         dex                           ; Back up text index.
                     decb
-                    bmi       getline             ; Beyond start of line, reinitialize.
+                    bmi       GetLine@@           ; Beyond start of line, reinitialize.
 
-nextchar            lda       KBD_CR              ; Key ready?
-                    bpl       nextchar            ; Loop until ready.
+NextChar@@          lda       KBD_CR              ; Key ready?
+                    bpl       NextChar@@          ; Loop until ready.
                     lda       KBD                 ; Load character. B7 should be '1'.
                     sta       ,x                  ; Add to text buffer.
-                    bsr       echo                ; Display character.
+                    bsr       Echo                ; Display character.
                     cmpa      #13|$80             ; CR?
-                    bne       notcr               ; No.
+                    bne       NotCR@@             ; No.
           ;-------------------------------------- ; Process an input line.
-cr                  ldx       #in+256-1           ; Reset text index to in-1, +256 so that
+                    ldx       #in+256-1           ; Reset text index to in-1, +256 so that
                                                   ; 'inc inptr+1' will result in $0200.
                     stx       inptr
                     clra                          ; For XAM mode. 0->B.
 
-setblok             asla                          ; Leaves $56 if setting BLOCK XAM mode.
-setmode             sta       mode                ; $00 = XAM, $BA = STOR, $56 = BLOK XAM.
-blskip              inc       inptr+1             ; Advance text index.
-nextitem            ldx       inptr
+SetBlock@@          asla                          ; Leaves $56 if setting BLOCK XAM mode.
+SetMode@@           sta       mode                ; $00 = XAM, $BA = STOR, $56 = BLOK XAM.
+BlankSkip@@         inc       inptr+1             ; Advance text index.
+NextItem@@          ldx       inptr
                     lda       ,x                  ; Get character.
                     cmpa      #13|$80             ; CR?
-                    beq       getline             ; Yes, done this line.
+                    beq       GetLine@@           ; Yes, done this line.
                     cmpa      #$ae                ; "."?
-                    beq       setblok             ; Set BLOCK XAM mode.
-                    bls       blskip              ; Skip delimiter.
+                    beq       SetBlock@@          ; Set BLOCK XAM mode.
+                    bls       BlankSkip@@         ; Skip delimiter.
                     cmpa      #':'|$80            ; ":"?
-                    beq       setmode             ; Yes, set STOR mode.
+                    beq       SetMode@@           ; Yes, set STOR mode.
                     cmpa      #'R'|$80            ; "R"?
                     beq       run                 ; Yes, run user program.
                     clr       l                   ; $00->L.
                     clr       h                   ; and H.
                     stx       ysav                ; Save Y for comparison.
 
-nexthex             ldx       inptr
+NextHex@@           ldx       inptr
                     lda       ,x                  ; Get character for hex test.
                     eora      #$b0                ; Map digits to $0-9.
                     cmpa      #9                  ; Digit?
-                    bls       dig                 ; Yes.
+                    bls       Dig@@               ; Yes.
                     adda      #$89                ; Map letter "A"-"F" to $FA-FF.
                     cmpa      #$f9                ; Hex letter?
-                    bls       nothex              ; No, character not hex.
+                    bls       NotHex@@            ; No, character not hex.
 
-dig                 asla:4                        ; Hex digit to MSD of A.
+Dig@@               asla:4                        ; Hex digit to MSD of A.
 
                     ldb       #4                  ; Shift count.
-hexshift            asla                          ; Hex digit left, MSB to carry.
+HexShift@@          asla                          ; Hex digit left, MSB to carry.
                     rol       l                   ; Rotate into LSD.
                     rol       h                   ; Rotate into MSD's.
                     decb                          ; Done 4 shifts?
-                    bne       hexshift            ; No, loop.
+                    bne       HexShift@@          ; No, loop.
 
                     inc       inptr+1             ; Advance text index.
-                    bra       nexthex             ; Always taken. Check next character for hex.
+                    bra       NextHex@@           ; Always taken. Check next character for hex.
 
-nothex              cpx       ysav                ; Check if L, H empty (no hex digits).
-                    beq       escape              ; Yes, generate ESC sequence.
+NotHex@@            cpx       ysav                ; Check if L, H empty (no hex digits).
+                    beq       Esc@@               ; Yes, generate ESC sequence.
                     tst       mode                ; Test MODE byte.
-                    bpl       notstor             ; B6=0 for STOR, 1 for XAM and BLOCK XAM
+                    bpl       NotStor             ; B6=0 for STOR, 1 for XAM and BLOCK XAM
           ;-------------------------------------- ; STOR mode
                     ldx       st
                     lda       l                   ; LSD's of hex data.
                     sta       ,x                  ; Store at current 'store index'.
                     inx
                     stx       st
-tonextitem          bra       nextitem            ; Get next command item.
+?ToNextItem         bra       NextItem@@          ; Get next command item.
 
-prbyte              psha                          ; Save A for LSD.
+;*******************************************************************************
+
+prbyte              proc
+                    psha                          ; Save A for LSD.
                     lsra:4                        ; MSD to LSD position.
-                    bsr       prhex               ; Output hex digit.
+                    bsr       PrHex               ; Output hex digit.
                     pula                          ; Restore A.
-prhex               anda      #$0f                ; Mask LSD for hex print.
+;                   bra       PrHex
+
+;*******************************************************************************
+
+PrHex               proc
+                    anda      #$0f                ; Mask LSD for hex print.
                     ora       #'0'|$80            ; Add "0".
                     cmpa      #'9'|$80            ; Digit?
-                    bls       echo                ; Yes, output it.
+                    bls       Echo                ; Yes, output it.
                     adda      #7                  ; Add offset for letter.
-echo                tst       DSP                 ; DA bit (B7) cleared yet?
-                    bmi       echo                ; No, wait for display.
+;                   bra       Echo
+
+;*******************************************************************************
+
+Echo                proc
+Loop@@              tst       DSP                 ; DA bit (B7) cleared yet?
+                    bmi       Loop@@              ; No, wait for display.
                     sta       DSP                 ; Output character. Sets DA.
                     rts                           ; Return.
 
-run                 ldx       xam
+;*******************************************************************************
+
+run                 proc
+                    ldx       xam
                     jmp       ,x                  ; Run at current XAM index.
 
-notstor             bne       xamnext             ; mode = $00 for XAM, $56 for BLOCK XAM.
+;*******************************************************************************
+
+NotStor             proc
+                    bne       XamNext@@           ; mode = $00 for XAM, $56 for BLOCK XAM.
                     ldx       h                   ; Copy hex data to
                     stx       st                  ; 'store index'.
                     stx       xam                 ; And to 'XAM index'.
                     clra                          ; set Z flag to force following branch.
 
-nxtprnt             bne       prdata              ; NE means no address to print.
+Loop@@              bne       PrData@@            ; NE means no address to print.
                     lda       #13|$80             ; CR.
-                    bsr       echo                ; Output it.
+                    bsr       Echo                ; Output it.
                     lda       xam                 ; 'Examine index' high-order byte.
                     bsr       prbyte              ; Output it in hex format.
                     lda       xam+1               ; Low-order 'Examine index' byte.
                     bsr       prbyte              ; Output it in hex format.
                     lda       #':'|$80            ; ":".
-                    bsr       echo                ; Output it.
+                    bsr       Echo                ; Output it.
 
-prdata              lda       #' '|$80            ; Blank.
-                    bsr       echo                ; Output it.
+PrData@@            lda       #' '|$80            ; Blank.
+                    bsr       Echo                ; Output it.
 
                     ldx       xam
                     lda       ,x                  ; Get data byte at 'examine index'.
                     bsr       prbyte              ; Output it in hex format.
 
-xamnext             clr       mode                ; 0->MODE (XAM mode).
+XamNext@@           clr       mode                ; 0->MODE (XAM mode).
                     ldx       xam                 ; Compare 'examine index' to hex data.
                     cpx       h
-                    beq       tonextitem          ; Not less, so more data to output.
+                    beq       ?ToNextItem         ; Not less, so more data to output.
                     inx
                     stx       xam
                     lda       xam+1               ; Check low-order 'examine index' byte
                     anda      #$07                ; For MOD 8 = 0
-                    bra       nxtprnt             ; always taken
+                    bra       Loop@@              ; always taken
 
 ;*******************************************************************************
                     #VECTORS  $FFF8               ; vector table
